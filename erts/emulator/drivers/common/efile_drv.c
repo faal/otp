@@ -57,6 +57,7 @@
 #define FILE_FADVISE            31
 #define FILE_EXISTS             32
 #define FILE_FALLOCATE          33
+#define FILE_SENDFILE           34
 
 /* Return codes */
 
@@ -400,6 +401,12 @@ struct t_data
 	struct {
 	    Sint64 newFileLength;
 	} fallocate;
+        struct {
+	    Sint destfd;
+	    off_t offset;
+	    size_t count;
+	    size_t written;
+	} sendfile;
     } c;
     char b[1];
 };
@@ -1729,6 +1736,31 @@ static void invoke_fallocate(void *data)
     d->again = 0;
     d->result_ok = efile_fallocate(&d->errInfo, fd, newFileLength);
 }
+static void invoke_sendfile(void *data)
+{
+    struct t_data *d = (struct t_data *) data;
+    int fd = (int) d->fd;
+    int destfd = (int) d->c.sendfile.destfd;
+    off_t offset = (off_t) d->c.sendfile.offset;
+    size_t count = (size_t) d->c.sendfile.count;
+
+    d->result_ok = efile_sendfile(&d->errInfo, fd, destfd, &offset, &count);
+
+    if (d->result_ok) {
+	d->c.sendfile.written += count;
+	d->again = 0;
+    } else if (d->errInfo.posix_errno == EAGAIN ||
+	       d->errInfo.posix_errno == EINTR) {
+	if (count > 0) {
+	    d->c.sendfile.offset += count;
+	    d->c.sendfile.written += count;
+	    d->c.sendfile.count -= count;
+	}
+	d->again = 1;
+    } else {
+	d->again = 0;
+    }
+}
 
 static void free_readdir(void *data)
 {
@@ -2149,6 +2181,14 @@ file_async_ready(ErlDrvData e, ErlDrvThreadData data)
 	  }
 	  free_preadv(data);
 	  break;
+      case FILE_SENDFILE:
+	  if (!d->result_ok) {
+	      reply_error(desc, &d->errInfo);
+	  } else {
+	      reply_Uint(desc, d->c.sendfile.written);
+	  }
+	  free_data(data);
+	  break;
       default:
 	abort();
     }
@@ -2491,6 +2531,27 @@ file_output(ErlDrvData e, char* buf, int count)
         d->c.fallocate.newFileLength = get_int64((uchar*) buf);
         goto done;
     }
+
+    case FILE_SENDFILE:
+	{
+	    d = EF_SAFE_ALLOC(sizeof(struct t_data));
+	    d->fd = fd;
+	    d->command = command;
+	    d->invoke = invoke_sendfile;
+	    d->free = free_data;
+	    d->level = 2;
+	    d->c.sendfile.destfd = get_int32((uchar*) buf);
+	    /* TODO: are off_t and size_t 64bit on all platforms?
+	       off_t is 32bit on win32 msvc. maybe configurable in msvc.
+	       Maybe use '#if SIZEOF_SIZE_T == 4'? */
+	    d->c.sendfile.offset = get_int64(((uchar*) buf)
+					     + sizeof(Sint32));
+	    d->c.sendfile.count = get_int64(((uchar*) buf)
+					    + sizeof(Sint32)
+					    + sizeof(Sint64));
+	    d->c.sendfile.written = 0;
+	    goto done;
+	}
 
     }
 

@@ -26,8 +26,11 @@
 
 %% Generic file contents operations
 -export([open/2, close/1, datasync/1, sync/1, advise/4, position/2, truncate/1,
-	 write/2, pwrite/2, pwrite/3, read/2, read_line/1, pread/2, pread/3, copy/3]).
+         write/2, pwrite/2, pwrite/3, read/2, read_line/1, pread/2, pread/3, 
+         copy/3, sendfile/4]).
 -export([allocate/2]).
+
+
 
 %% Specialized file operations
 -export([open/1, open/3]).
@@ -53,7 +56,7 @@
 	 read_link/1, read_link/2,
 	 read_link_info/1, read_link_info/2,
 	 list_dir/1, list_dir/2,
-     exists/1, exists/2]).
+         exists/1, exists/2]).
 %% How to start and stop the ?DRV port.
 -export([start/0, stop/1]).
 
@@ -102,6 +105,7 @@
 -define(FILE_ADVISE,           31).
 -define(FILE_EXISTS,           32).
 -define(FILE_ALLOCATE,         33).
+-define(FILE_SENDFILE,         34).
 
 
 %% Driver responses
@@ -548,6 +552,11 @@ write_file(_, _) ->
     {error, badarg}.
     
 
+%% Returns {error, Reason} | {ok, BytesCopied}
+sendfile(#file_descriptor{module = ?MODULE, data = {Port, _}},
+	 DestFD, Offset, Bytes) ->
+    drv_command(Port, <<?FILE_SENDFILE, DestFD:32,
+			Offset:64, Bytes:64>>).
 
 %%%-----------------------------------------------------------------
 %%% Functions operating on files without handle to the file. ?DRV.
